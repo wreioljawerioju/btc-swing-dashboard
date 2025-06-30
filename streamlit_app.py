@@ -2,48 +2,106 @@ import streamlit as st
 import pandas as pd
 import requests
 import openai
-import pandas_ta as ta
 
+# ---------------------------
+# 🔐 사용자 API 키 입력
+# ---------------------------
 st.set_page_config(layout="wide")
-st.title("📈 비트코인 단기 분석 대시보드 (스윙용)")
+st.title("📈 비트코인 단기 분석 대시보드 (pandas_ta 없이)")
 
 api_key = st.text_input("🔑 OpenAI API 키를 입력하세요", type="password")
 if not api_key:
-    st.warning("API 키 입력 후 GPT 기능 활성화")
+    st.warning("API 키를 입력해야 GPT 해석 기능이 작동합니다.")
 else:
     openai.api_key = api_key
 
-timeframes = {"1분봉": ("1m",1000), "5분봉": ("5m",500), "15분봉": ("15m",100), "1시간봉": ("1h",100), "4시간봉": ("4h",100)}
+# ---------------------------
+# 🕒 타임프레임 구성
+# ---------------------------
+timeframes = {
+    "1분봉": ("1m", 1000),
+    "5분봉": ("5m", 500),
+    "15분봉": ("15m", 100),
+    "1시간봉": ("1h", 100),
+    "4시간봉": ("4h", 100)
+}
 
+# ---------------------------
+# 📦 바이낸스 OHLCV 데이터 요청
+# ---------------------------
 def get_ohlcv(symbol="BTCUSDT", interval="1m", limit=100):
-    res = requests.get("https://api.binance.com/api/v3/klines", params={"symbol":symbol,"interval":interval,"limit":limit})
-    df = pd.DataFrame(res.json(), columns=["t","o","h","l","c","v"]+["_"]*6)
-    df["c"]=df["c"].astype(float); df["v"]=df["v"].astype(float)
+    url = "https://api.binance.com/api/v3/klines"
+    params = {"symbol": symbol, "interval": interval, "limit": limit}
+    res = requests.get(url, params=params)
+    data = res.json()
+    df = pd.DataFrame(data, columns=["time", "open", "high", "low", "close", "volume"] + ["_"]*6)
+    df["close"] = df["close"].astype(float)
+    df["volume"] = df["volume"].astype(float)
     return df
 
-def analyze(df):
-    df["RSI"]=ta.rsi(df["c"],14)
-    df["StochRSI"]=ta.stochrsi(df["c"])["STOCHRSIk_14_14_3_3"]
-    df["EMA20"]=ta.ema(df["c"],20); df["EMA50"]=ta.ema(df["c"],50); df["EMA200"]=ta.ema(df["c"],200)
-    return df.dropna()
+# ---------------------------
+# 📐 RSI 계산 함수
+# ---------------------------
+def compute_rsi(series, period=14):
+    delta = series.diff()
+    gain = delta.where(delta > 0, 0.0)
+    loss = -delta.where(delta < 0, 0.0)
+    avg_gain = gain.rolling(window=period).mean()
+    avg_loss = loss.rolling(window=period).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
 
+# ---------------------------
+# 🤖 GPT 해석 함수
+# ---------------------------
 def gpt_summary(results):
-    prompt="각 시간봉 지표 상태:\n"
-    for tf,m in results.items():
-        prompt+=f"[{tf}] 가격:{m['close']:.2f}, RSI:{m['RSI']:.2f}, StochRSI:{m['StochRSI']:.2f}, 거래량:{m['volume']:.2f}\n"
-    prompt+="\n스윙포지션 관점에서 단기전망 요약해주세요."
-    r=openai.ChatCompletion.create(model="gpt-4o-mini", messages=[{"role":"user","content":prompt}], max_tokens=200)
-    return r.choices[0].message.content.strip()
+    prompt = "비트코인의 각 시간봉 지표 상태는 다음과 같아:\n\n"
+    for tf, m in results.items():
+        prompt += f"[{tf}] 가격: {m['close']:.2f}, RSI: {m['RSI']:.2f}, 거래량: {m['volume']:.2f}\n"
+    prompt += "\n스윙 트레이딩 관점에서 단기 가격 전망을 한국어로 요약해줘."
 
-results={}
-for label,(tf,limit) in timeframes.items():
-    df=get_ohlcv(interval=tf,limit=limit)
-    df2=analyze(df)
-    latest=df2.iloc[-1]
-    st.subheader(label)
-    st.write(f"가격:{latest['c']:.2f}, RSI:{latest['RSI']:.2f}, StochRSI:{latest['StochRSI']:.2f}, 거래량:{latest['v']:.2f}")
-    results[label]={"close":latest["c"],"RSI":latest["RSI"],"StochRSI":latest["StochRSI"],"volume":latest["v"]}
+    response = openai.ChatCompletion.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=200
+    )
+    return response.choices[0].message.content.strip()
 
+# ---------------------------
+# 📊 메인 분석
+# ---------------------------
+results = {}
+for label, (tf, limit) in timeframes.items():
+    df = get_ohlcv(interval=tf, limit=limit)
+    df["EMA20"] = df["close"].ewm(span=20).mean()
+    df["EMA50"] = df["close"].ewm(span=50).mean()
+    df["EMA200"] = df["close"].ewm(span=200).mean()
+    df["RSI"] = compute_rsi(df["close"])
+    df = df.dropna()
+    latest = df.iloc[-1]
+
+    st.subheader(f"✅ {label} 분석")
+    st.write(f"""
+    - 현재가: {latest['close']:.2f} USDT  
+    - RSI: {latest['RSI']:.2f}  
+    - 거래량: {latest['volume']:.2f}  
+    - EMA20: {latest['EMA20']:.2f}  
+    - EMA50: {latest['EMA50']:.2f}  
+    - EMA200: {latest['EMA200']:.2f}
+    """)
+    results[label] = {
+        "close": latest["close"],
+        "RSI": latest["RSI"],
+        "volume": latest["volume"]
+    }
+
+# ---------------------------
+# 🧠 GPT 종합 해석
+# ---------------------------
 st.markdown("---")
-if api_key and st.button("GPT 단기전망 요청"):
-    st.write(gpt_summary(results))
+st.subheader("🧠 GPT 종합 해석")
+if api_key and st.button("GPT에게 단기 전망 요청하기"):
+    with st.spinner("GPT 분석 중..."):
+        summary = gpt_summary(results)
+    st.success(summary)
