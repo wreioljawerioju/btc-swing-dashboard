@@ -19,8 +19,8 @@ else:
 # 🕒 타임프레임 구성
 # ---------------------------
 timeframes = {
-    "1분봉": ("1m", 1000),
-    "5분봉": ("5m", 500),
+    "1분봉": ("1m", 100),
+    "5분봉": ("5m", 200),
     "15분봉": ("15m", 100),
     "1시간봉": ("1h", 100),
     "4시간봉": ("4h", 100)
@@ -32,12 +32,19 @@ timeframes = {
 def get_ohlcv(symbol="BTCUSDT", interval="1m", limit=100):
     url = "https://api.binance.com/api/v3/klines"
     params = {"symbol": symbol, "interval": interval, "limit": limit}
-    res = requests.get(url, params=params)
-    data = res.json()
-    df = pd.DataFrame(data, columns=["time", "open", "high", "low", "close", "volume"] + ["_"]*6)
-    df["close"] = df["close"].astype(float)
-    df["volume"] = df["volume"].astype(float)
-    return df
+    try:
+        res = requests.get(url, params=params, timeout=10)
+        data = res.json()
+        if isinstance(data, list) and len(data) > 0:
+            df = pd.DataFrame(data, columns=["time", "open", "high", "low", "close", "volume"] + ["_"]*6)
+            df["close"] = df["close"].astype(float)
+            df["volume"] = df["volume"].astype(float)
+            return df
+        else:
+            return pd.DataFrame()
+    except Exception as e:
+        print(f"❌ API 오류 ({interval}):", e)
+        return pd.DataFrame()
 
 # ---------------------------
 # 📐 RSI 계산 함수
@@ -74,6 +81,10 @@ def gpt_summary(results):
 results = {}
 for label, (tf, limit) in timeframes.items():
     df = get_ohlcv(interval=tf, limit=limit)
+    if df.empty:
+        st.warning(f"⚠️ {label} 데이터가 부족하거나 오류가 발생했습니다.")
+        continue
+
     df["EMA20"] = df["close"].ewm(span=20).mean()
     df["EMA50"] = df["close"].ewm(span=50).mean()
     df["EMA200"] = df["close"].ewm(span=200).mean()
@@ -81,7 +92,7 @@ for label, (tf, limit) in timeframes.items():
     df = df.dropna()
 
     if df.empty:
-        st.warning(f"⚠️ {label} 데이터가 부족하거나 오류가 발생했습니다.")
+        st.warning(f"⚠️ {label} 지표 계산 후 데이터가 없습니다.")
         continue
 
     latest = df.iloc[-1]
