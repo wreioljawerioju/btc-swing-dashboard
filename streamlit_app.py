@@ -79,6 +79,11 @@ for label, (tf, limit) in timeframes.items():
     df["EMA200"] = df["close"].ewm(span=200).mean()
     df["RSI"] = compute_rsi(df["close"])
     df = df.dropna()
+
+    if df.empty:
+        st.warning(f"⚠️ {label} 데이터가 부족하거나 오류가 발생했습니다.")
+        continue
+
     latest = df.iloc[-1]
 
     st.subheader(f"✅ {label} 분석")
