@@ -3,3 +3,4 @@ pandas
 requests
 openai
 pandas-ta
+setuptools
