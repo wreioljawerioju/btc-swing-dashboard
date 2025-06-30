@@ -27,13 +27,14 @@ timeframes = {
 }
 
 # ---------------------------
-# 📦 바이낸스 OHLCV 데이터 요청
+# 📦 바이낭스 OHLCV 데이터 요청
 # ---------------------------
 def get_ohlcv(symbol="BTCUSDT", interval="1m", limit=100):
     url = "https://api.binance.com/api/v3/klines"
     params = {"symbol": symbol, "interval": interval, "limit": limit}
     try:
         res = requests.get(url, params=params, timeout=10)
+        res.raise_for_status()
         data = res.json()
         if isinstance(data, list) and len(data) > 0:
             df = pd.DataFrame(data, columns=["time", "open", "high", "low", "close", "volume"] + ["_"]*6)
@@ -43,11 +44,11 @@ def get_ohlcv(symbol="BTCUSDT", interval="1m", limit=100):
         else:
             return pd.DataFrame()
     except Exception as e:
-        print(f"❌ API 오류 ({interval}):", e)
+        st.error(f"❌ {interval} OHLCV 요청 오류: {e}")
         return pd.DataFrame()
 
 # ---------------------------
-# 📐 RSI 계산 함수
+# 📀 RSI 계산 함수
 # ---------------------------
 def compute_rsi(series, period=14):
     delta = series.diff()
@@ -60,13 +61,13 @@ def compute_rsi(series, period=14):
     return rsi
 
 # ---------------------------
-# 🤖 GPT 해석 함수
+# 🧠 GPT 해석 함수
 # ---------------------------
 def gpt_summary(results):
     prompt = "비트코인의 각 시간봉 지표 상태는 다음과 같아:\n\n"
     for tf, m in results.items():
         prompt += f"[{tf}] 가격: {m['close']:.2f}, RSI: {m['RSI']:.2f}, 거래량: {m['volume']:.2f}\n"
-    prompt += "\n스윙 트레이딩 관점에서 단기 가격 전망을 한국어로 요약해줘."
+    prompt += "\n스윗 트레이딩 관점에서 단기 가격 전략을 한국어로 요약해줘."
 
     response = openai.ChatCompletion.create(
         model="gpt-4o",
@@ -81,7 +82,7 @@ def gpt_summary(results):
 results = {}
 for label, (tf, limit) in timeframes.items():
     df = get_ohlcv(interval=tf, limit=limit)
-    if df.empty:
+    if df.empty or len(df) < 50:
         st.warning(f"⚠️ {label} 데이터가 부족하거나 오류가 발생했습니다.")
         continue
 
@@ -117,7 +118,7 @@ for label, (tf, limit) in timeframes.items():
 # ---------------------------
 st.markdown("---")
 st.subheader("🧠 GPT 종합 해석")
-if api_key and st.button("GPT에게 단기 전망 요청하기"):
+if api_key and st.button("GPT에게 단기 전략 요청하기"):
     with st.spinner("GPT 분석 중..."):
         summary = gpt_summary(results)
     st.success(summary)
